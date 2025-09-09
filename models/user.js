@@ -6,7 +6,10 @@ const userSchema = new mongoose.Schema({
     password    : { type: String, required: true },
     dob         : { type: Date, required: true },
     gender      : { type: String, required: true },
-    gameID      : { type: String, required: true },  
+    gameID      : { type: String, required: true },
+    otp         : { type: String, default: null },
+    otpExpiry   : { type: Date, default: null },
+    otpVerified : { type: Boolean, default: false },
     isDeleted   : { type: Boolean, default: false }
 });
 

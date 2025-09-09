@@ -1,12 +1,16 @@
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const { sendOTPEmail } = require('../helpers/email');
+const mongoose = require('mongoose');
 require('dotenv').config();
 
 const User = require('../models/user');
 const SECRET_KEY = process.env.SECRET_KEY;
 const validator = require('validator');
-const moment = require('moment');
 
+const generateOTP = () => {
+    return Math.floor(100000 + Math.random() * 900000).toString();
+};
 
 exports.postSignup = async (req, res) => {
     const { email, displayName, password, dob, gender } = req.body;
@@ -95,5 +99,133 @@ exports.postSignin = async (req, res) => {
     } catch (err) {
         console.error(err);
         return res.status(500).send('Internal Server Error');
+    }
+};
+
+exports.forgotPassword = async (req, res) => {
+    const { email } = req.body;
+    const { gameID } = req.params;
+
+    if (!validator.isEmail(email)) {
+        return res.status(400).json({ message: 'Invalid email format.' });
+    }
+
+    try {
+        const user = await User.findOne({ email, gameID, isDeleted: false });
+        if (!user) {
+            return res.status(404).json({ message: 'User not found for this game.' });
+        }
+
+        const otp = generateOTP();
+        const otpExpiry = new Date(Date.now() + 10 * 60 * 1000);
+
+        user.otp = otp;
+        user.otpExpiry = otpExpiry;
+        await user.save();
+
+        const emailSent = await sendOTPEmail(email, otp, user.displayName);
+        
+        if (!emailSent) {
+            return res.status(500).json({ message: 'Failed to send OTP email. Please try again.' });
+        }
+
+        return res.status(200).json({
+            message: 'OTP sent successfully to your email address.',
+            data: {
+                userId: user._id
+            }
+        });
+
+    } catch (err) {
+        console.error(err);
+        return res.status(500).json({ message: 'Internal Server Error' });
+    }
+};
+
+exports.validateOTP = async (req, res) => {
+    const { userId, otp } = req.body;
+
+    if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
+        return res.status(400).json({ message: 'Valid userId is required.' });
+    }
+
+    if (!otp || otp.length !== 6) {
+        return res.status(400).json({ message: 'OTP must be 6 digits.' });
+    }
+
+    try {
+        const user = await User.findOne({ _id: userId, isDeleted: false });
+        if (!user) {
+            return res.status(404).json({ message: 'User not found for this game.' });
+        }
+
+        if (!user.otp || !user.otpExpiry) {
+            return res.status(400).json({ message: 'No OTP found. Please request a new OTP.' });
+        }
+
+        if (new Date() > user.otpExpiry) {
+            return res.status(400).json({ message: 'OTP has expired. Please request a new OTP.' });
+        }
+
+        if (user.otp !== otp) {
+            return res.status(400).json({ message: 'Invalid OTP.' });
+        }
+
+        user.otpVerified = true;
+        await user.save();
+
+        return res.status(200).json({
+            message: 'OTP validated successfully.',
+            data: {
+                userId: user._id,
+            }
+        });
+
+    } catch (err) {
+        console.error(err);
+        return res.status(500).json({ message: 'Internal Server Error' });
+    }
+};
+
+exports.resetPassword = async (req, res) => {
+    const { newPassword, userId } = req.body;
+
+    if (!newPassword || newPassword.length < 6) {
+        return res.status(400).json({ message: 'Password must be at least 6 characters long.' });
+    }
+
+    if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
+        return res.status(400).json({ message: 'Valid userId is required.' });
+    }
+
+    try {
+        const user = await User.findOne({ _id: userId, isDeleted: false });
+        if (!user) {
+            return res.status(404).json({ message: 'User not found for this game.' });
+        }
+
+        if (!user.otp || !user.otpExpiry || new Date() > user.otpExpiry) {
+            return res.status(400).json({ message: 'OTP expired. Please start the process again.' });
+        }
+
+        if (!user.otpVerified) {
+            return res.status(400).json({ message: 'OTP not verified. Please verify OTP before resetting password.' });
+        }
+
+        const hashedPassword = await bcrypt.hash(newPassword, 10);
+
+        user.password = hashedPassword;
+        user.otp = null;
+        user.otpExpiry = null;
+        user.otpVerified = false;
+        await user.save();
+
+        return res.status(200).json({
+            message: 'Password reset successfully.'
+        });
+
+    } catch (err) {
+        console.error(err);
+        return res.status(500).json({ message: 'Internal Server Error' });
     }
 };
