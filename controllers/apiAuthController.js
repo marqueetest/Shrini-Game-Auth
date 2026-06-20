@@ -142,6 +142,32 @@ exports.forgotPassword = async (req, res) => {
     }
 };
 
+exports.deleteUser = async (req, res) => {
+    const { email } = req.body;
+    const { gameID } = req.params;
+
+    if (!validator.isEmail(email)) {
+        return res.status(400).json({ message: 'Invalid email format.' });
+    }
+
+    try {
+        const user = await User.findOne({ email, gameID, isDeleted: false });
+        if (!user) {
+            return res.status(404).json({ message: 'User not found for this game.' });
+        }
+
+        await User.deleteOne({ email, gameID, isDeleted: false });
+
+        return res.status(200).json({
+            message: 'User Deleted Successfully.'
+        });
+
+    } catch (err) {
+        console.error(err);
+        return res.status(500).json({ message: 'Internal Server Error' });
+    }
+};
+
 exports.validateOTP = async (req, res) => {
     const { userId, otp } = req.body;
 
